@@ -37,13 +37,13 @@
   #dlgInput{flex:1;font-family:inherit;font-size:16px;padding:8px;border:3px solid var(--ink);background:#fff;color:var(--ink)}
   #controls{position:fixed;inset:0;pointer-events:none;z-index:15;display:none}
   #controls.show{display:block}
-  #dpad{position:absolute;left:14px;bottom:18px;width:132px;height:132px;pointer-events:auto}
-  .dbtn{position:absolute;width:44px;height:44px;background:rgba(244,239,228,.14);
-    border:2px solid rgba(244,239,228,.4);color:rgba(244,239,228,.75);
-    display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:bold;
+  #joy{position:absolute;left:14px;bottom:18px;width:132px;height:132px;pointer-events:auto;
     user-select:none;-webkit-user-select:none;touch-action:none}
-  .dbtn.on{background:rgba(224,83,61,.5)}
-  #dU{left:44px;top:0}#dD{left:44px;top:88px}#dL{left:0;top:44px}#dR{left:88px;top:44px}
+  #joyBase{position:absolute;inset:0;border-radius:50%;background:rgba(244,239,228,.10);
+    border:2px solid rgba(244,239,228,.4)}
+  #joyKnob{position:absolute;left:44px;top:44px;width:44px;height:44px;border-radius:50%;
+    background:rgba(244,239,228,.22);border:2px solid rgba(244,239,228,.6);pointer-events:none}
+  #joy.on #joyKnob{background:rgba(224,83,61,.5)}
   #abtn{position:absolute;right:20px;bottom:34px;width:64px;height:64px;border-radius:50%;
     background:rgba(224,83,61,.35);border:3px solid rgba(244,239,228,.5);color:#f4efe4;
     font-size:20px;font-weight:bold;display:flex;align-items:center;justify-content:center;
@@ -211,9 +211,9 @@
 </div>
 
 <div id="controls">
-  <div id="dpad">
-    <div class="dbtn" id="dU">▲</div><div class="dbtn" id="dD">▼</div>
-    <div class="dbtn" id="dL">◀</div><div class="dbtn" id="dR">▶</div>
+  <div id="joy">
+    <div id="joyBase"></div>
+    <div id="joyKnob"></div>
   </div>
   <div id="abtn">A</div>
 </div>
@@ -225,7 +225,8 @@
    NEW: preset lineup (12 Fan archetypes) → hero render →
    deep customization. Two renders, one identity.
    Mohawk. New HUD: Respect / Coins / Health.
-   (Joystick + ride system + DCU Fridays challenge = v0.5)
+   Analog joystick replaces the d-pad for touch movement.
+   (Ride system + DCU Fridays challenge = v0.5)
    ========================================================= */
 
 /* =========================================================
@@ -303,7 +304,7 @@ const G = {
     sock:'none', sockColor:0, shoeColor:0 },
   possum:null,
   ray:{ x:500, y:200, dir:'left', frame:0, met:false, approaching:false },
-  camX:0, camY:0, keys:{}, dpad:{u:false,d:false,l:false,r:false},
+  camX:0, camY:0, keys:{}, joy:{x:0,y:0,active:false},
   trail:[], flags:{ scooterKicked:false, trashLooted:{}, rayIdle:0 },
   homeReturn:{x:0,y:0}, t:0
 };
@@ -2836,13 +2837,29 @@ function toast(msg,ms=2600){
 window.addEventListener('keydown',e=>{ G.keys[e.key.toLowerCase()]=true;
   if((e.key==='Enter'||e.key===' '||e.key.toLowerCase()==='e')&&G.mode==='play')pressA(); });
 window.addEventListener('keyup',e=>{ G.keys[e.key.toLowerCase()]=false; });
-[['dU','u'],['dD','d'],['dL','l'],['dR','r']].forEach(([id,k])=>{
-  const el=$(id);
-  const on=e=>{e.preventDefault();G.dpad[k]=true;el.classList.add('on');};
-  const off=e=>{e.preventDefault();G.dpad[k]=false;el.classList.remove('on');};
-  el.addEventListener('pointerdown',on);
-  el.addEventListener('pointerup',off);el.addEventListener('pointerleave',off);el.addEventListener('pointercancel',off);
+const joyEl=$('joy'), joyKnob=$('joyKnob'), JOY_R=44;
+let joyPid=null;
+function joyMove(e){
+  const r=joyEl.getBoundingClientRect();
+  let jx=e.clientX-(r.left+r.width/2), jy=e.clientY-(r.top+r.height/2);
+  const len=Math.hypot(jx,jy);
+  if(len>JOY_R){ jx=jx/len*JOY_R; jy=jy/len*JOY_R; }
+  joyKnob.style.transform=`translate(${jx}px,${jy}px)`;
+  G.joy.x=jx/JOY_R; G.joy.y=jy/JOY_R; G.joy.active=true;
+}
+function joyReset(e){
+  if(joyPid!==e.pointerId)return;
+  joyPid=null; G.joy.x=0; G.joy.y=0; G.joy.active=false;
+  joyKnob.style.transform=''; joyEl.classList.remove('on');
+}
+joyEl.addEventListener('pointerdown',e=>{
+  e.preventDefault(); joyPid=e.pointerId;
+  joyEl.setPointerCapture(e.pointerId);
+  joyEl.classList.add('on'); joyMove(e);
 });
+joyEl.addEventListener('pointermove',e=>{ if(joyPid===e.pointerId)joyMove(e); });
+joyEl.addEventListener('pointerup',joyReset);
+joyEl.addEventListener('pointercancel',joyReset);
 $('abtn').addEventListener('pointerdown',e=>{e.preventDefault();pressA();});
 
 const DLG={active:false,queue:[],step:null};
@@ -3026,16 +3043,18 @@ function update(){
   const creatorOpen=$('creator').classList.contains('show');
   if(!DLG.active && !creatorOpen){
     let dx=0,dy=0;
-    if(G.keys['arrowleft']||G.keys['a']||G.dpad.l)dx-=1;
-    if(G.keys['arrowright']||G.keys['d']||G.dpad.r)dx+=1;
-    if(G.keys['arrowup']||G.keys['w']||G.dpad.u)dy-=1;
-    if(G.keys['arrowdown']||G.keys['s']||G.dpad.d)dy+=1;
-    p.moving=!!(dx||dy);
+    if(G.keys['arrowleft']||G.keys['a'])dx-=1;
+    if(G.keys['arrowright']||G.keys['d'])dx+=1;
+    if(G.keys['arrowup']||G.keys['w'])dy-=1;
+    if(G.keys['arrowdown']||G.keys['s'])dy+=1;
+    if(G.joy.active){ dx=G.joy.x; dy=G.joy.y; }
+    const mag=Math.hypot(dx,dy);
+    p.moving=mag>0.18;
     if(p.moving){
       if(Math.abs(dx)>=Math.abs(dy))p.dir=dx<0?'left':'right';
       else p.dir=dy<0?'up':'down';
-      const len=Math.hypot(dx,dy)||1;
-      let nx=p.x+dx/len*p.speed, ny=p.y+dy/len*p.speed;
+      const spd=p.speed*Math.min(1,mag);
+      let nx=p.x+dx/mag*spd, ny=p.y+dy/mag*spd;
       if(G.map==='street'){
         nx=clamp(nx,12,WORLD_W-12); ny=clamp(ny,ST.top+6,ST.botWalkBot-4);
         let blocked=false;
