@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>RVA POSSUM · v0.1</title>
+<style>
+  html,body{margin:0;padding:0;background:#120a1e;height:100%;overflow:hidden;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+    font-family:'Courier New',monospace;color:#f4efe4;}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;}
+  canvas{image-rendering:pixelated;image-rendering:crisp-edges;display:block;
+    box-shadow:0 0 60px rgba(163,61,92,.25);}
+  /* CRT scanlines, like the mockup */
+  #crt{position:fixed;inset:0;pointer-events:none;z-index:9;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,.14) 0 1px,transparent 1px 3px);
+    mix-blend-mode:multiply;}
+  .ov{position:fixed;inset:0;z-index:10;display:none;align-items:center;justify-content:center;
+    flex-direction:column;text-align:center;background:rgba(12,7,20,.82);padding:16px;box-sizing:border-box;}
+  .ov.show{display:flex;}
+  .ttl{font-weight:900;font-size:clamp(34px,9vw,64px);letter-spacing:2px;color:#f4efe4;
+    text-shadow:3px 3px 0 #a33d5c,6px 6px 0 #2b2333;margin:0;}
+  .sub{color:#ffc94a;font-weight:bold;letter-spacing:4px;font-size:clamp(11px,3vw,15px);margin:6px 0 18px;}
+  .lbl{color:#c9a7d8;font-size:12px;letter-spacing:2px;margin:10px 0 6px;}
+  .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
+  .pick{background:#241736;border:2px solid #4a3560;border-radius:8px;padding:6px 8px 4px;
+    cursor:pointer;display:flex;flex-direction:column;align-items:center;min-width:64px;}
+  .pick.sel{border-color:#ffc94a;background:#33224c;}
+  .pick.lock{opacity:.55;}
+  .pick span{font-size:10px;margin-top:2px;color:#e8ddf0;}
+  .pick small{font-size:9px;color:#ffc94a;}
+  .go{margin-top:22px;background:#e8382e;color:#fff;border:0;border-radius:8px;
+    font-family:inherit;font-weight:900;font-size:18px;letter-spacing:2px;padding:12px 30px;
+    cursor:pointer;box-shadow:0 4px 0 #7a1a14;}
+  .go:active{transform:translateY(3px);box-shadow:0 1px 0 #7a1a14;}
+  .hint{margin-top:16px;font-size:11px;color:#9b8db3;line-height:1.7;}
+  .big{font-size:clamp(26px,7vw,44px);font-weight:900;color:#ffc94a;margin:4px 0;}
+  .stat{font-size:14px;margin:2px 0;color:#e8ddf0;}
+  .unlock{color:#7de8a0;font-weight:bold;font-size:13px;margin-top:10px;}
+  #banner{position:fixed;left:0;right:0;top:18%;text-align:center;z-index:8;pointer-events:none;
+    font-weight:900;font-size:clamp(18px,5vw,30px);letter-spacing:3px;color:#7de8a0;
+    text-shadow:2px 2px 0 #143020;opacity:0;transition:opacity .25s;}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="cv"></canvas></div>
+<div id="crt"></div>
+<div id="banner"></div>
+
+<div class="ov show" id="title">
+  <h1 class="ttl">RVA POSSUM</h1>
+  <div class="sub">W&nbsp;MAIN&nbsp;ST&nbsp;·&nbsp;NIGHT&nbsp;SHIFT</div>
+  <div class="lbl">PICK YOUR POSSUM</div>
+  <div class="row" id="colorRow"></div>
+  <div class="lbl">DRIP</div>
+  <div class="row" id="accRow"></div>
+  <div class="row" id="accColorRow" style="margin-top:8px;"></div>
+  <button class="go" id="goBtn">HIT THE BLOCK</button>
+  <div class="hint">TAP = hop · TAP AGAIN in air = double jump<br>
+  TWO FINGERS DOWN = play dead (hold to stay down)<br>
+  run through trash cans to heal · hop the rats · freeze when the flashlight sweeps</div>
+</div>
+
+<div class="ov" id="over">
+  <div class="lbl">THE BLOCK GOT YOU</div>
+  <div class="big" id="ovDist">0m</div>
+  <div class="stat" id="ovScore">SCORE 0</div>
+  <div class="stat" id="ovSnacks">SNACKS 0</div>
+  <div class="stat" id="ovBest" style="color:#ffc94a;"></div>
+  <div class="unlock" id="ovUnlock"></div>
+  <button class="go" id="againBtn">RUN IT BACK</button>
+  <div class="hint" id="ovStreet"></div>
+</div>
+
+<script>
+"use strict";
+/* =========================================================
+   RVA POSSUM — v0.4.1 "Night Shift"
+   (v0.4.1: mural wall painted edge-to-edge in the artwork's
+    own background — no more generic brick frame)
+   Endless runner spin-off of RVA (Fan District).
+   TAP = hop · HOLD = play dead (flop on landing)
+   Reuses drawPossum lineage from rva-v0-5.
+   Web prototype → iOS widget (Steve-style) later.
+   ========================================================= */
+
+/* ============ SCRIPT — ALL TEXT (script lead: Emily) ===== */
+const SCRIPT = {
+  gameover_title: 'THE BLOCK GOT YOU',
+  banner_street: n => '✦ '+n+' ✦',
+  banner_snack: '+SNACKS',
+  banner_heal: '+♥ SNACKED UP',
+  banner_dodge: (p,m)=>'CLEAN DODGE +'+p+(m>1?' ×'+m:''),
+  banner_rat: (p,m)=>'RAT HOPPED +'+p+(m>1?' ×'+m:''),
+  unlock_color: n => 'NEW POSSUM UNLOCKED: '+n+'!',
+  unlock_acc: n => 'NEW DRIP COLOR: '+n+'!',
+  made_it: n => 'you made it past '+n+'. the block knows.',
+  didnt: 'the litter was found on Plum St. get back out there.',
+};
+
+/* ---------- constants ---------- */
+const VW=400, VH=200, GROUND=166;
+const OUT='#2b2333';
+const POSSUM_COLORS=[
+  {n:'Gray',      body:'#a4a4a4', face:'#f3f3f3', dark:'#747474', req:0},
+  {n:'Blue-Gray', body:'#939cb2', face:'#ecf0f6', dark:'#646c82', req:0},
+  {n:'Tan-Brown', body:'#b8956b', face:'#f3e7d3', dark:'#856745', req:800,  reqName:'LOMBARDY ST'},
+  {n:'Dark Brown',body:'#6e523c', face:'#e8dcc8', dark:'#4a3628', req:1250, reqName:'BELVIDERE ST'},
+];
+const ACCESSORIES=['Bandana','Chain','Collar','None'];
+const ACC_COLORS=[
+  {n:'Red',c:'#d93a3a',req:0},{n:'Teal',c:'#2fa9a2',req:0},
+  {n:'Gold',c:'#d9a53a',req:500,reqName:'PLUM+'},
+  {n:'Purple',c:'#8a5ad9',req:1000,reqName:'HARRISON+'},
+];
+/* west → east down W Main, deeper into the night */
+const STREETS=[
+  {d:150, n:'ROBINSON ST'},{d:300, n:'STRAWBERRY ST'},{d:450, n:'PLUM ST'},
+  {d:600, n:'MEADOW ST'},{d:800, n:'LOMBARDY ST'},{d:1000,n:'HARRISON ST'},
+  {d:1250,n:'BELVIDERE ST'},{d:1600,n:'THE DEEP FAN'},
+];
+
+/* ---------- state (session-only; companion app owns saves later) ---------- */
+const G={
+  mode:'title', t:0,
+  possum:{color:0, accessory:'Bandana', accColor:0},
+  x:0, dist:0, speed:1.2, spdMul:1,
+  py:GROUND, vy:0, grounded:true, dead:false, frame:0,
+  held:false, holdWasAir:false, pressT:0, jumpBuf:0, pcount:0,
+  hearts:6, iframes:0, score:0, snacks:0, jumps:0, pulse:0, bonus:0, combo:0, // hearts in HALF units (6 = ♥♥♥)
+  hazards:[], props:[], particles:[], nextSpawn:120, streetIdx:0,
+  best:0, bestStreet:'', newUnlocks:[],
+};
+const $=id=>document.getElementById(id);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+let seed=2026; const rand=()=> (seed=(seed*16807)%2147483647)/2147483647;
+
+/* ---------- canvas ---------- */
+const cv=$('cv'), C=cv.getContext('2d');
+cv.width=VW; cv.height=VH;
+function fit(){
+  const s=Math.min(window.innerWidth/VW, window.innerHeight/VH);
+  cv.style.width=(VW*s)+'px'; cv.style.height=(VH*s)+'px';
+}
+window.addEventListener('resize',fit); fit();
+function px(x,y,w,h,c){ C.fillStyle=c; C.fillRect(Math.round(x),Math.round(y),w,h); }
+
+/* =========================================================
+   POSSUM RENDERER — same animal as rva-v0-5 drawPossum,
+   adapted: always faces right, +dead pose. Do not fork art.
+   ========================================================= */
+function drawPossum(ctx,cx,feetY,p,frame){
+  ctx.save(); ctx.translate(cx,feetY); ctx.scale(0.9,0.9);
+  const F=(x,y,w,h,c)=>{ctx.fillStyle=c;ctx.fillRect(x,y,w,h);};
+  const sx=0, bot=0, C1=POSSUM_COLORS[p.color], m=v=>v;
+  const y0=bot-20;
+  F(sx+m(-16),y0+6,6,3,OUT); F(sx+m(-15),y0+7,5,1,'#e0a8a8');            // tail
+  F(sx+m(-18),y0+3,4,4,OUT); F(sx+m(-17),y0+4,2,2,'#e0a8a8');
+  F(sx-11,y0+3,22,12,OUT);
+  F(sx-10,y0+4,20,10,C1.body);
+  F(sx-10,y0+10,20,4,C1.dark);
+  F(sx-8,y0+4,10,2,'#ffffff2e');
+  const hxp=sx+m(6);
+  F(hxp-7,y0-4,15,14,OUT);
+  F(hxp-6,y0-3,13,12,C1.face);
+  F(hxp+m(6),y0+1,3,4,OUT); F(hxp+m(6),y0+2,2,2,C1.face);
+  F(hxp+m(8),y0+2,2,2,'#eda8ba');                                        // nose
+  F(hxp+m(-5)-2,y0-7,5,5,OUT); F(hxp+m(-5)-1,y0-6,3,3,C1.dark);          // ears
+  F(hxp+m(2)-2,y0-7,5,5,OUT); F(hxp+m(2)-1,y0-6,3,3,C1.dark);
+  F(hxp+m(-5)-1,y0-5,2,1,'#eda8ba');
+  F(hxp+m(1),y0,4,5,OUT); F(hxp+m(1)+1,y0+1,2,3,'#2b2333');              // eye
+  F(hxp+m(1)+1,y0+1,1,1,'#fff');
+  const s=Math.floor(frame/5)%2;
+  F(sx-8,y0+14+(s?0:2),3,4,C1.dark); F(sx-2,y0+14+(s?2:0),3,4,C1.dark);  // legs
+  F(sx+4,y0+14+(s?0:2),3,4,C1.dark);
+  drawAcc(F,sx,y0,p);
+  ctx.restore();
+}
+function drawAcc(F,sx,y0,p){
+  const nx=sx+2, ac=ACC_COLORS[p.accColor].c;
+  if(p.accessory==='Chain'){ F(nx-2,y0+6,7,2,'#efdb84'); F(nx,y0+8,3,2,ac); }
+  else if(p.accessory==='Bandana'){ F(nx-3,y0+6,9,3,ac); F(nx-1,y0+9,4,3,ac); F(nx-3,y0+8,9,1,'#00000022'); }
+  else if(p.accessory==='Collar'){ F(nx-2,y0+6,7,2,ac); F(nx,y0+8,3,2,'#efdb84'); }
+}
+/* belly-up, stiff legs, X eyes, lil tongue — the money sprite */
+function drawPossumDead(ctx,cx,feetY,p){
+  ctx.save(); ctx.translate(cx,feetY);
+  const F=(x,y,w,h,c)=>{ctx.fillStyle=c;ctx.fillRect(x,y,w,h);};
+  const C1=POSSUM_COLORS[p.color];
+  F(-13,-8,26,8,OUT); F(-12,-7,24,6,C1.body);                             // body on back
+  F(-12,-4,24,3,C1.face);                                                 // belly up
+  F(-16,-4,4,3,OUT); F(-15,-3,3,1,'#e0a8a8');                             // tail flat
+  for(const lx of [-8,-3,2,7]){ F(lx,-13,2,6,OUT); F(lx,-12,2,4,C1.dark);} // legs up, stiff
+  F(9,-10,10,9,OUT); F(10,-9,8,7,C1.face);                                // head tilted back
+  F(17,-6,3,2,OUT); F(18,-6,2,1,'#eda8ba');                               // nose
+  F(11,-12,4,4,OUT); F(12,-11,2,2,C1.dark);                               // ear
+  F(12,-7,3,3,OUT);                                                       // X eye
+  F(12,-7,1,1,C1.face); F(14,-7,1,1,C1.face); F(13,-6,1,1,C1.face); F(12,-5,1,1,C1.face); F(14,-5,1,1,C1.face);
+  F(15,-3,3,2,'#e87a8f');                                                 // tongue. commit to the bit
+  ctx.restore();
+}
+
+/* =========================================================
+   WORLD — palette pulled straight from the approved mockup
+   ========================================================= */
+const SKY=[['#160b26',0],['#2b1240',.35],['#5c1e50',.6],['#a33d5c',.82],['#d4695a',1]];
+const HOUSE_WALLS=['#7a3b32','#5a6b8a','#cfc8bc','#8a4438','#6b5a4a','#4a5a6b'];
+const STARS=[]; for(let i=0;i<40;i++)STARS.push({x:rand()*VW,y:rand()*70,tw:rand()*100});
+
+function skylineY(x){ return 96 - (Math.floor(Math.abs(Math.sin(x*0.02))*18)+6); }
+
+/* AUTHORED CANON — "Possum & Flowers" mural (Emily, v1). Converted 48×48/12c. NEVER regenerate. */
+const MURAL={w:48,h:48,pal:["#d5b375","#867342","#625953","#8f3d5b","#533f52","#1d3949","#5a234c","#33203f","#23173b","#200c3f","#141a37","#130933"],rows:[
+"999999999999999b77776667777778bb9999999999999999",
+"999997999779b55563334443344334117b95599999999999",
+"9999918733655225633378b438b436100189799799aaaa99",
+"99a5aa9333522546437478b44bb73410001b6338a5555a99",
+"999555b33552556644b47bb47bab44100001b3375555ab99",
+"999955767522555a78b98bb77b8b44112100796554559799",
+"99937563522555554427bbbbbabb8744a41029a5636b44b9",
+"999339635255555278847bbabaa8ba4ba72126963336b999",
+"99b667785555aa74bbab4744444247aaa721196333337b99",
+"9717ab55555a5a74a63787401244017ba7214733373337b9",
+"9601ba55b86755747336b71000041004b711833395833379",
+"9b17a466776685b47338b200000020008716b89b555b336b",
+"97b557338b8887b8443b400000000002286b67b555578669",
+"98a5633337b8636b874700007700000a28b9795559118117",
+"9b56363333333336b8710002b770000242b74455a6117689",
+"9a58b6363333333bb72000007ba100000274785571119959",
+"9a5aa37736633637a4100000000000000487444591111759",
+"9baa58b63a6366b9742000000000000030374899111117a9",
+"866ba57bba86bbab74410000020000033338748941119617",
+"7648770714bba55b424420000181000033797911a5571119",
+"9aa81111111255b72224472100073677abb4377117511179",
+"a5111178711755b4222247ab72001368b77233b4117125b9",
+"984117bab1111ab422224447abb211277982332711545517",
+"9b11128b71111b72222224447a8887722b833334715a1118",
+"b10111111101bb7442442244774244221472223355521189",
+"97b1010111714b74444744447222242222843447a5512a87",
+"99801402107bbb74227b744842222442224ba55557555588",
+"a5a7b70ab1755b74424ba7ab77444784222a5554434a5599",
+"b555ab7abb555ba74448bbb744447b844227b5a23324aaa9",
+"95555ab5b555a48a7788bb77444787774424b44422337559",
+"9b5555aa5555827b888b887888b7630364472333443655a9",
+"99b5555a545b748b87a63aa8bbb878730748233232745a99",
+"869b75111111a7aab8a63377bb72227603a4322333234669",
+"975a61111114a8bab8ab6338b74224483388434348333479",
+"9a521118b7111aabbaaab67bb7444448338a7784a5577aa9",
+"98a1117bbb128b676677bbbbb87444a603b55ab5aaaaa5a9",
+"9bb7111771101b3343337367a8aaab6006ba555555555a99",
+"9771111111187bb3347773336bbb63003b8ba55a5ba5aa99",
+"966bb0111718b55a3333644363330036b9a55555a5555a99",
+"99ba87b61aba555ab8633333333366bb6675555555555a89",
+"99b5555bb5b55555555555555555555a769b55a55555b979",
+"999a5555aa5555b55a5555a555a55558877bb555aab93799",
+"9859a5555a555b95abb559bb5a9b55b63b77b55a555a6799",
+"99999955555aa5a58475ab775a9b55b633b9a5a55555b999",
+"99997669aa5a55b746447444488446a6335b55a555aa9999",
+"9999666979b5a99755576755544555a635555a9989999999",
+"99999999799aa95558555555555585998558a99859999999",
+"999999999999999999998999989999999999999999999999"
+]};
+let muralCv=null;
+function buildMural(){
+  muralCv=document.createElement("canvas"); muralCv.width=48; muralCv.height=48;
+  const g=muralCv.getContext("2d");
+  for(let y=0;y<48;y++)for(let x=0;x<48;x++){
+    g.fillStyle=MURAL.pal["0123456789ab".indexOf(MURAL.rows[y][x])];
+    g.fillRect(x,y,1,1);
+  }
+}
+function isLandmark(i){ return ((i*2654435761)>>>0)%2147483647%28===9; }
+function drawLandmarkWall(hx){
+  const top=84, bg=MURAL.pal[MURAL.pal.length-1];   // mural's own deep purple = the painted wall
+  px(hx,top,60,140-top,bg);                          // edge-to-edge, no generic brick
+  px(hx,top,60,2,"#2b2333");                         // roofline
+  if(muralCv)C.drawImage(muralCv,hx+6,top+5);
+}
+
+function drawHouses(off){
+  const BW=64;                                  // house width
+  const first=Math.floor(off/BW);
+  for(let i=first;i<first+8;i++){
+    const hx=i*BW-off;
+    seed=(i*2654435761)%2147483647||1987;
+    if(isLandmark(i)){ drawLandmarkWall(hx); continue; }                  // authored mural landmark
+    const wall=HOUSE_WALLS[Math.floor(rand()*HOUSE_WALLS.length)];
+    const h=52+Math.floor(rand()*22), top=140-h;
+    px(hx,top,BW-4,h,wall);
+    px(hx,top,BW-4,3,'#2b2333');                                          // cornice
+    px(hx,top+3,BW-4,2,'rgba(0,0,0,.28)');
+    for(let b=top+8;b<138;b+=6) px(hx+((b/6)%2?0:3),b,2,1,'rgba(0,0,0,.14)'); // brick tick
+    const isStore=rand()>0.82;
+    if(isStore){                                                          // mini mart!
+      px(hx+4,110,BW-12,30,'#241a2e');
+      px(hx+6,104,BW-16,10,'#f0e8d8');
+      C.fillStyle='#c22a2a'; C.font='bold 7px "Courier New",monospace'; C.textAlign='left';
+      C.fillText('MINI MART',hx+8,112);
+      px(hx+8,118,16,18,'#ffca6b'); px(hx+30,118,16,18,'#8fd8c8');        // lit glass
+      px(hx+26,118,3,18,'#2b2333');
+    } else {
+      for(let wy=top+10;wy<118;wy+=16){                                   // windows
+        for(let wx=hx+8;wx<hx+BW-16;wx+=18){
+          const lit=rand()>0.42;
+          px(wx,wy,8,11,'#2b2333');
+          px(wx+1,wy+1,6,9, lit?'#ffca6b':'#3a2c4a');
+          if(lit)px(wx+1,wy+1,6,2,'#ffe3a0');
+        }
+      }
+      px(hx+6,122,BW-16,4,'#2b2333');                                     // porch roof
+      px(hx+8,126,2,14,'#3d3348'); px(hx+BW-14,126,2,14,'#3d3348');
+      for(let rx=hx+10;rx<hx+BW-14;rx+=4)px(rx,132,1,8,'#d8d0c4');        // railing
+      px(hx+Math.floor(BW/2)-6,124,10,16,'#4a1e28');                      // door
+    }
+    if(rand()>0.6){                                                       // street tree
+      px(hx+BW-6,120,3,20,'#3a2a22');
+      px(hx+BW-14,104,20,18,'#26402e'); px(hx+BW-11,100,14,10,'#2e4f38');
+    }
+  }
+}
+
+function drawGround(off){
+  px(0,140,VW,4,'#6e4438');                                               // sidewalk back edge
+  px(0,144,VW,26,'#a05a44');                                              // bricks
+  C.fillStyle='rgba(0,0,0,.16)';
+  for(let y=146;y<170;y+=5){
+    const o=((y/5)%2?0:4)-(off%9);
+    for(let x=o;x<VW+9;x+=9)C.fillRect(Math.round(x),y,4,1);
+  }
+  px(0,170,VW,3,'#8f887c');                                               // curb
+  px(0,173,VW,VH-173,'#3a3644');                                          // road
+  C.fillStyle='#e0ac42';
+  for(let x=-(off%40);x<VW;x+=40)C.fillRect(Math.round(x),186,16,2);      // dashes
+}
+
+function drawLamps(off){
+  const SP=170, first=Math.floor(off/SP);
+  for(let i=first;i<first+4;i++){
+    const lx=i*SP-off+30;
+    px(lx,108,2,60,'#1d1826'); px(lx-3,106,8,5,'#1d1826');
+    px(lx-2,107,6,3,'#ffdf8a');
+    const g=C.createRadialGradient(lx+1,110,2,lx+1,110,26);
+    g.addColorStop(0,'rgba(255,220,140,.30)'); g.addColorStop(1,'rgba(255,220,140,0)');
+    C.fillStyle=g; C.beginPath(); C.arc(lx+1,110,26,0,7); C.fill();
+    if(i%3===1){ px(lx+40,158,7,10,'#8a8f96'); px(lx+41,156,5,3,'#8a8f96'); px(lx+42,154,3,2,'#c8442e'); } // hydrant (sweater optional, v2)
+  }
+}
+
+/* ---------- hazards ---------- */
+function spawnHazard(){
+  const d=G.dist, r=rand();
+  const x=G.x+VW+20;
+  let type;
+  if(d>120 && r<0.13+Math.min(d/4500,0.10)) type='beam';
+  else if(d>80 && r<0.36) type='rat';
+  else if(r<0.55) type='scooter';
+  else if(r<0.75) type='bag';
+  else type='can';
+  /* fairness director: never force freeze-vs-jump at the same time.
+     beams (must freeze) and rats (must NOT freeze) are mutually exclusive
+     on screen — sequences yes, dilemmas never. */
+  const liveBeam=G.hazards.some(z=>z.type==='beam'&&!z.hitDone&&!z.scored);
+  const liveRat =G.hazards.some(z=>z.type==='rat' &&!z.hitDone&&z.x-G.x>-20);
+  if(type==='beam'&&(liveBeam||liveRat))type='can';
+  if(type==='rat'&&liveBeam)type='bag';
+  if(type==='beam') G.hazards.push({type,x:x+40,warn:50,hitDone:false});
+  else G.hazards.push({type,x,hitDone:false});
+  G.nextSpawn = 115+rand()*120 - Math.min(d/30,40);
+  if(type==='beam')G.nextSpawn+=70;                                       // breathing room behind a sweep
+}
+function hazardBox(h){
+  if(h.type==='scooter')return{w:20,h:13};
+  if(h.type==='rat')return{w:12,h:7};
+  if(h.type==='bag')return{w:13,h:11};
+  if(h.type==='can')return{w:11,h:15};
+  if(h.type==='beam')return{w:34,h:60};
+  return {w:0,h:0};
+}
+function drawHazard(h,sx){
+  if(h.type==='scooter'){                                                 // tipped rental scooter
+    px(sx,GROUND-3,20,2,'#2fa96a');                                       // deck
+    px(sx+3,GROUND-13,2,11,'#2fa96a');                                    // stem up
+    px(sx,GROUND-14,9,2,'#26805a');                                       // handlebar
+    px(sx,GROUND-12,2,2,'#1d1826'); px(sx+7,GROUND-12,2,2,'#1d1826');     // grips
+    px(sx+16,GROUND-2,4,4,'#1d1826'); px(sx-1,GROUND-2,4,4,'#1d1826');    // wheels
+    px(sx+6,GROUND-5,8,2,'#e8e0d0');                                      // brand strip
+  } else if(h.type==='rat'){
+    const st=Math.floor(G.t/4)%2;
+    px(sx+10,GROUND-4,6,1,'#8a7a6e');                                     // tail trailing
+    px(sx+1,GROUND-7,10,6,'#5e564e');                                     // body
+    px(sx-1,GROUND-6,4,4,'#5e564e');                                      // head, facing you
+    px(sx-2,GROUND-5,1,1,'#eda8ba');                                      // nose
+    px(sx,GROUND-6,1,1,'#2b2333');                                        // eye
+    px(sx+2,GROUND-8,2,2,'#4a443e');                                      // ear
+    px(sx+2,GROUND-1,2,1+(st?1:0),'#3a342e');                             // scurry legs
+    px(sx+7,GROUND-1,2,1+(st?0:1),'#3a342e');
+  } else if(h.type==='bag'){
+    px(sx,GROUND-9,13,9,'#181420'); px(sx+2,GROUND-11,8,4,'#181420');
+    px(sx+2,GROUND-8,4,2,'#2e2840'); px(sx+8,GROUND-5,3,2,'#2e2840');
+    px(sx+4,GROUND-13,4,3,'#181420');
+  } else if(h.type==='can'){
+    px(sx,GROUND-14,11,14,'#274a30'); px(sx-1,GROUND-15,13,3,'#1c3824');
+    px(sx+2,GROUND-11,2,8,'#356044'); px(sx+7,GROUND-11,2,8,'#356044');
+    px(sx+3,GROUND-17,5,3,'#d8a24a');                                     // peeking pizza
+  } else if(h.type==='beam'){
+    if(h.warn>0){                                                          // "!" heads-up
+      if(Math.floor(G.t/8)%2){ C.fillStyle='#e8382e'; C.font='bold 14px "Courier New",monospace';
+        C.textAlign='center'; C.fillText('!',clamp(sx+17,VW-14,VW-14),58); }
+      return;
+    }
+    const cx=sx+17;
+    C.fillStyle='rgba(255,235,150,.20)';
+    C.beginPath(); C.moveTo(cx-6,0); C.lineTo(cx+24,0); C.lineTo(cx+17,GROUND+2); C.lineTo(cx-17,GROUND+2); C.closePath(); C.fill();
+    C.fillStyle='rgba(255,240,180,.30)';
+    C.beginPath(); C.ellipse(cx,GROUND,19,5,0,0,7); C.fill();
+    C.fillStyle='rgba(255,250,220,.5)';
+    C.beginPath(); C.ellipse(cx,GROUND,9,3,0,0,7); C.fill();
+  }
+}
+
+/* ---------- particles + street signs ---------- */
+function popSnacks(x){
+  for(let i=0;i<6;i++)G.particles.push({x,y:GROUND-12,vx:(rand()*2-1)*1.4,vy:-(1.5+rand()*1.5),
+    t:36,c:['#d8a24a','#e8d060','#c8442e','#f0e8d8'][i%4]});
+}
+function drawSign(p,sx){
+  px(sx,110,2,58,'#3d3348');
+  px(sx-16,110,34,10,'#1c3824'); px(sx-15,111,32,8,'#2a5a3a');
+  C.fillStyle='#eef4e8'; C.font='bold 6px "Courier New",monospace'; C.textAlign='center';
+  C.fillText(p.name.replace(' ST','').slice(0,10),sx+1,117);
+}
+
+/* =========================================================
+   INPUT — 1 finger tap = hop · double tap in air = double
+   jump · TWO fingers on screen = play dead (hold to stay).
+   4-frame buffer on single taps so a 2nd finger can cancel.
+   ========================================================= */
+const PTRS=new Set();
+function tryJump(){
+  if(G.dead)return;
+  if(G.grounded){ G.vy=-4.2; G.grounded=false; G.jumps=1; }
+  else if(G.jumps===1){ G.vy=-3.8; G.jumps=2; }
+}
+window.addEventListener('pointerdown',e=>{
+  if(e.target.closest('.ov')||G.mode!=='play')return;
+  PTRS.add(e.pointerId); G.pcount=PTRS.size;
+  if(G.pcount>=2)G.jumpBuf=0;                                             // 2nd finger cancels the hop
+  else G.jumpBuf=4;                                                       // ~66ms grace window
+});
+function ptrUp(e){
+  PTRS.delete(e.pointerId); G.pcount=PTRS.size;
+  if(G.pcount<2 && G.dead)G.dead=false;
+}
+window.addEventListener('pointerup',ptrUp);
+window.addEventListener('pointercancel',ptrUp);
+window.addEventListener('keydown',e=>{ if(G.mode!=='play')return;
+  if(!e.repeat&&(e.key===' '||e.key==='ArrowUp'))G.jumpBuf=1;
+  if(e.key==='ArrowDown'||e.key==='s')G.pcount=2; });
+window.addEventListener('keyup',e=>{
+  if(e.key==='ArrowDown'||e.key==='s'){G.pcount=PTRS.size; if(G.dead)G.dead=false;} });
+
+/* ---------- update ---------- */
+function update(){
+  G.t++;
+  const targetMul = G.dead?0:1;
+  G.spdMul += (targetMul-G.spdMul)*0.25;
+  if(G.dead && G.spdMul<0.03)G.spdMul=0;
+  G.speed = (1.8 + Math.min(G.dist*0.0007,1.8)) * G.spdMul;
+  G.x += G.speed; G.dist += G.speed*0.06;
+  G.score = Math.floor(G.dist) + G.snacks*20 + G.bonus;
+  if(G.iframes>0)G.iframes--;
+
+  // physics
+  if(!G.grounded){
+    if(G.pcount>=2 && G.vy<4.5)G.vy=4.5;                                  // two fingers mid-air = slam down
+    G.vy+=0.175; G.py+=G.vy;
+    if(G.py>=GROUND){ G.py=GROUND; G.vy=0; G.grounded=true; G.jumps=0;
+      if(G.pcount>=2)G.dead=true;                                         // flop on touch
+    }
+  } else if(G.pcount>=2 && !G.dead){ G.dead=true; }                       // flop right here
+  if(G.jumpBuf>0){ G.jumpBuf--; if(G.jumpBuf===0 && G.pcount<2)tryJump(); }
+  if(G.grounded)G.frame++;
+
+  // spawning
+  G.nextSpawn-=G.speed;
+  if(G.nextSpawn<=0)spawnHazard();
+
+  // street milestones
+  const st=STREETS[G.streetIdx];
+  if(st && G.dist>=st.d){
+    G.props.push({name:st.n,x:G.x+VW+10});
+    showBanner(SCRIPT.banner_street(st.n),'#7de8a0');
+    G.bonus+=100; G.streetIdx++;
+  }
+
+  // hazards
+  const pxBox={x:60-8,w:16,top:G.py-14,bot:G.py};
+  for(const h of G.hazards){
+    if(h.type==='beam'&&h.warn>0){h.warn--;continue;}
+    const sx=h.x-G.x, hb=hazardBox(h);
+    if(h.type==='beam')h.x-=1.5+G.speed*0.3;                              // own legs: sweeps even when you freeze
+    if(h.type==='rat')h.x-=0.9+G.speed*0.35;                              // incoming rat, opposite direction
+    if(h.hitDone)continue;
+    const overl = sx < 60+6 && sx+hb.w > 60-6;
+    if(!overl)continue;
+    if(h.type==='can'){ h.hitDone=true; G.snacks+=3; popSnacks(60);
+      if(G.hearts<6){ G.hearts=Math.min(6,G.hearts+1); showBanner(SCRIPT.banner_heal,'#e8382e'); }
+      else showBanner(SCRIPT.banner_snack,'#ffc94a'); }
+    else if(h.type==='beam'){ if(!G.dead && G.pcount<2 && G.iframes<=0){ hurt(h); } }  // committed flop (2 fingers) counts, even mid-air
+    else { const clear = G.py <= GROUND-hb.h+2;                            // graze forgiven
+      if(!clear && G.iframes<=0){
+        if(h.type==='rat') hurt(h);                                        // rats bite even a 'dead' possum
+        else if(!G.dead) hurt(h);                                          // junk can't hurt a flopped possum
+      }
+    }
+  }
+  for(const h of G.hazards){                                              // survived a live threat = paid
+    if(h.hitDone||h.scored)continue;
+    const past=h.x-G.x+hazardBox(h).w<52;
+    if(h.type==='beam'&&h.warn<=0&&past){
+      h.scored=true; G.combo++;
+      const m=Math.min(G.combo,4), pts=50*m;
+      G.bonus+=pts; G.pulse=45; showBanner(SCRIPT.banner_dodge(pts,m),'#7de8a0');
+    } else if(h.type==='rat'&&past){
+      h.scored=true; G.combo++;
+      const m=Math.min(G.combo,4), pts=15*m;
+      G.bonus+=pts; G.pulse=25; showBanner(SCRIPT.banner_rat(pts,m),'#7de8a0');
+    }
+  }
+  G.hazards=G.hazards.filter(h=>h.x-G.x>-60);
+  G.props=G.props.filter(p=>p.x-G.x>-60);
+  for(const p of G.particles){p.x+=p.vx;p.y+=p.vy;p.vy+=0.12;p.t--;}
+  G.particles=G.particles.filter(p=>p.t>0);
+}
+function hurt(h){
+  h.hitDone=true; G.hearts-=2; G.iframes=90; G.combo=0;                   // full heart per hit, combo broken
+  if(G.hearts<=0)gameOver();
+}
+
+/* ---------- render ---------- */
+function render(){
+  // sky
+  const g=C.createLinearGradient(0,0,0,140);
+  for(const [c,s] of SKY)g.addColorStop(s,c);
+  C.fillStyle=g; C.fillRect(0,0,VW,140);
+  for(const s of STARS){ if(Math.floor((G.t+s.tw)/40)%3)px(s.x,s.y,1,1,'#e8d8f0'); }
+  // clouds streaks
+  C.fillStyle='rgba(212,105,90,.25)';
+  for(let i=0;i<4;i++){ const cx=((i*140-G.x*0.05)%(VW+80))-40; C.fillRect(cx,68+i*9,60,3); }
+  // skyline (far parallax)
+  const so=G.x*0.15;
+  C.fillStyle='#241533';
+  for(let x=-(so%24);x<VW;x+=24){
+    const h=36+Math.abs(Math.sin((x+so)*0.045))*34;
+    C.fillRect(Math.round(x),140-h,18,h);
+  }
+  C.fillStyle='rgba(255,202,107,.14)';
+  for(let x=-(so%24)+4;x<VW;x+=24)C.fillRect(Math.round(x),92,2,3);
+
+  drawHouses(G.x*0.5);
+  drawGround(G.x);
+  drawLamps(G.x);
+  for(const p of G.props)drawSign(p,p.x-G.x);
+  for(const h of G.hazards)drawHazard(h,h.x-G.x);
+
+  // possum
+  if(G.pulse>0){ G.pulse--;
+    const r=14+(45-G.pulse)*0.35, a=G.pulse/45*0.5;
+    const gg=C.createRadialGradient(60,G.py-8,2,60,G.py-8,r);
+    gg.addColorStop(0,'rgba(255,214,90,'+a+')'); gg.addColorStop(1,'rgba(255,214,90,0)');
+    C.fillStyle=gg; C.beginPath(); C.arc(60,G.py-8,r,0,7); C.fill();
+  }
+  const blink=G.iframes>0 && Math.floor(G.t/4)%2===0;
+  if(!blink){
+    C.fillStyle='rgba(10,6,16,.35)'; C.beginPath(); C.ellipse(60,GROUND+1,12,2.5,0,0,7); C.fill();
+    if(G.dead)drawPossumDead(C,60,GROUND,G.possum);
+    else drawPossum(C,60,G.py,G.possum,G.frame);
+  }
+  for(const p of G.particles)px(p.x,p.y,2,2,p.c);
+
+  // HUD — mockup layout
+  C.font='bold 9px "Courier New",monospace';
+  C.textAlign='left'; C.fillStyle='#f4efe4'; C.fillText('SCORE',8,12);
+  C.fillStyle='#ffc94a'; C.fillText(String(G.score).padStart(7,'0'),8,22);
+  if(G.combo>=2){ C.fillStyle='#7de8a0'; C.font='bold 8px "Courier New",monospace';
+    C.fillText('COMBO ×'+Math.min(G.combo,4),8,32); C.font='bold 9px "Courier New",monospace'; }
+  C.textAlign='center'; C.fillStyle='#f4efe4'; C.fillText('DISTANCE',VW/2,12);
+  C.fillStyle='#ffc94a'; C.fillText(String(Math.floor(G.dist)).padStart(5,'0')+'M',VW/2,22);
+  C.textAlign='right'; C.fillStyle='#f4efe4'; C.fillText('SNACKS',VW-8,12);
+  C.fillStyle='#ffc94a'; C.fillText(String(G.snacks),VW-8,22);
+  for(let i=0;i<3;i++){ const hx=VW-58+i*13;
+    drawHeart(hx,28, clamp(G.hearts-i*2,0,2)); }
+  const nx=STREETS[G.streetIdx];
+  if(nx){ C.textAlign='center'; C.fillStyle='#9b8db3'; C.font='bold 7px "Courier New",monospace';
+    C.fillText('NEXT: '+nx.n+' → '+Math.max(0,Math.ceil(nx.d-G.dist))+'M',VW/2,34); }
+}
+function drawHeart(x,y,fill){
+  const base=fill===2?'#e8382e':'#3a2c40';
+  px(x+1,y,3,2,base);px(x+6,y,3,2,base);px(x,y+1,10,3,base);px(x+1,y+4,8,2,base);
+  px(x+3,y+6,4,1,base);px(x+4,y+7,2,1,base);
+  if(fill===1){ const c='#e8382e';                                        // left half only
+    px(x+1,y,3,2,c);px(x,y+1,5,3,c);px(x+1,y+4,4,2,c);px(x+3,y+6,2,1,c);px(x+4,y+7,1,1,c);
+  }
+}
+
+/* ---------- banner ---------- */
+let bannerTimer=null;
+function showBanner(txt,color){
+  const b=$('banner'); b.textContent=txt; b.style.color=color; b.style.opacity=1;
+  clearTimeout(bannerTimer); bannerTimer=setTimeout(()=>b.style.opacity=0,1100);
+}
+
+/* ---------- game over / unlocks ---------- */
+function passedStreet(){
+  let name=''; for(const s of STREETS)if(G.dist>=s.d)name=s.n; return name;
+}
+function gameOver(){
+  G.mode='over';
+  const d=Math.floor(G.dist);
+  G.newUnlocks=[];
+  if(d>G.best){G.best=d; G.bestStreet=passedStreet();}
+  for(const pc of POSSUM_COLORS)if(pc.req&&G.best>=pc.req&&!pc.done){pc.done=true;G.newUnlocks.push(SCRIPT.unlock_color(pc.n));}
+  for(const ac of ACC_COLORS)if(ac.req&&G.best>=ac.req&&!ac.done){ac.done=true;G.newUnlocks.push(SCRIPT.unlock_acc(ac.n));}
+  $('ovDist').textContent=d+'M';
+  $('ovScore').textContent='SCORE '+G.score;
+  $('ovSnacks').textContent='SNACKS '+G.snacks;
+  $('ovBest').textContent='BEST '+G.best+'M';
+  $('ovUnlock').textContent=G.newUnlocks.join('  ·  ');
+  $('ovStreet').textContent = passedStreet()? SCRIPT.made_it(passedStreet()) : SCRIPT.didnt;
+  $('over').classList.add('show');
+}
+function resetRun(){
+  Object.assign(G,{mode:'play',x:0,dist:0,speed:1.25,spdMul:1,py:GROUND,vy:0,grounded:true,
+    dead:false,held:false,frame:0,hearts:6,iframes:0,score:0,snacks:0,jumps:0,pulse:0,bonus:0,combo:0,jumpBuf:0,pcount:0,
+    hazards:[],props:[],particles:[],nextSpawn:140,streetIdx:0});
+  seed=1987+Math.floor(Math.random()*99999);
+}
+
+/* ---------- title / picker ---------- */
+function unlockedColor(i){ const c=POSSUM_COLORS[i]; return !c.req || G.best>=c.req || c.done; }
+function unlockedAcc(i){ const c=ACC_COLORS[i]; return !c.req || G.best>=c.req || c.done; }
+function possumThumb(colorIdx,accessory,accColor){
+  const t=document.createElement('canvas'); t.width=52; t.height=34;
+  const g2=t.getContext('2d'); g2.imageSmoothingEnabled=false;
+  g2.translate(24,28);
+  drawPossum(g2,0,0,{color:colorIdx,accessory,accColor},8);
+  return t;
+}
+function buildPicker(){
+  const cr=$('colorRow'); cr.innerHTML='';
+  POSSUM_COLORS.forEach((c,i)=>{
+    const b=document.createElement('div');
+    const ok=unlockedColor(i);
+    b.className='pick'+(G.possum.color===i?' sel':'')+(ok?'':' lock');
+    if(ok)b.appendChild(possumThumb(i,G.possum.accessory,G.possum.accColor));
+    const s=document.createElement('span'); s.textContent=ok?c.n:'???'; b.appendChild(s);
+    if(!ok){const sm=document.createElement('small'); sm.textContent='reach '+c.reqName; b.appendChild(sm);}
+    b.addEventListener('click',()=>{ if(ok){G.possum.color=i; buildPicker();} });
+    cr.appendChild(b);
+  });
+  const ar=$('accRow'); ar.innerHTML='';
+  ACCESSORIES.forEach(a=>{
+    const b=document.createElement('div');
+    b.className='pick'+(G.possum.accessory===a?' sel':'');
+    const s=document.createElement('span'); s.textContent=a; s.style.fontSize='11px'; b.appendChild(s);
+    b.addEventListener('click',()=>{ G.possum.accessory=(a==='None')?null:a; buildPicker(); });
+    ar.appendChild(b);
+  });
+  const acr=$('accColorRow'); acr.innerHTML='';
+  ACC_COLORS.forEach((c,i)=>{
+    const b=document.createElement('div');
+    const ok=unlockedAcc(i);
+    b.className='pick'+(G.possum.accColor===i?' sel':'')+(ok?'':' lock');
+    b.style.minWidth='40px';
+    const sw=document.createElement('div'); sw.style.cssText='width:18px;height:18px;border-radius:4px;background:'+(ok?c.c:'#3a2c40');
+    b.appendChild(sw);
+    const s=document.createElement('span'); s.textContent=ok?c.n:c.reqName; b.appendChild(s);
+    b.addEventListener('click',()=>{ if(ok){G.possum.accColor=i; buildPicker();} });
+    acr.appendChild(b);
+  });
+}
+$('goBtn').addEventListener('click',()=>{ $('title').classList.remove('show'); resetRun(); });
+$('againBtn').addEventListener('click',()=>{ $('over').classList.remove('show'); buildPicker(); $('title').classList.add('show'); G.mode='title'; });
+
+/* ---------- loop ---------- */
+function loop(){
+  if(G.mode==='play'){ update(); render(); }
+  requestAnimationFrame(loop);
+}
+buildPicker();
+buildMural();
+render();
+loop();
+</script>
+</body>
+</html>
