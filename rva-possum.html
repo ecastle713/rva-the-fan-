@@ -204,10 +204,221 @@ function drawPossumDead(ctx,cx,feetY,p){
    WORLD — palette pulled straight from the approved mockup
    ========================================================= */
 const SKY=[['#160b26',0],['#2b1240',.35],['#5c1e50',.6],['#a33d5c',.82],['#d4695a',1]];
-const HOUSE_WALLS=['#7a3b32','#5a6b8a','#cfc8bc','#8a4438','#6b5a4a','#4a5a6b'];
 const STARS=[]; for(let i=0;i<40;i++)STARS.push({x:rand()*VW,y:rand()*70,tw:rand()*100});
 
-function skylineY(x){ return 96 - (Math.floor(Math.abs(Math.sin(x*0.02))*18)+6); }
+/* =========================================================
+   RICHMOND FACADE BLOCKS — variable-width buildings built
+   from reusable parts (cornice, tall windows, porch, stoop,
+   bay, chimney...). Lazily generated, deterministic per run,
+   with repetition controls so consecutive screens never
+   read copy-pasted. Environment only — no gameplay hooks.
+   ========================================================= */
+const WALLS_BRICK=['#7a3b32','#8a4438','#6e2f2f','#704a38','#6b5a4a'];
+const WALLS_PAINT=['#5a6b8a','#4a6b5a','#cfc8bc','#b8a88e','#8f8578','#5c5470'];
+const TRIM_COLORS=['#d8d0c4','#e8e0d0','#c9b8a0','#a8b8c0'];
+const DOOR_COLORS=['#4a1e28','#1e3a4a','#2a4a2e','#3a2a20','#7a2a28'];
+const AWNINGS=[['#a03028','#7a2420'],['#2a5a3a','#1c3824'],['#3a4a7a','#2a3658']];
+const BIZ_NAMES=['MARKET','FLOWERS','CAFE','BOOKS','DELI','RECORDS'];
+
+let BLOCKS=[], blocksEndX=0, runSeed=1987;
+const wr={s:1};
+const wrand=()=>(wr.s=(wr.s*16807)%2147483647)/2147483647;
+function resetBlocks(s){ BLOCKS=[]; blocksEndX=0; runSeed=s||1987; }
+function sinceType(t,maxBack){                      // blocks since type last appeared
+  for(let k=1;k<=Math.min(maxBack,BLOCKS.length);k++)
+    if(BLOCKS[BLOCKS.length-k].type===t)return k;
+  return maxBack+1;
+}
+function pickWall(prev){
+  const pool=wrand()<0.55?WALLS_BRICK:WALLS_PAINT;
+  let c=pool[Math.floor(wrand()*pool.length)];
+  if(prev&&prev.wall===c)c=pool[(pool.indexOf(c)+1)%pool.length];  // no twins side by side
+  return c;
+}
+function genBlock(){
+  const i=BLOCKS.length;
+  wr.s=((runSeed+i*2654435761)>>>0)%2147483647||1234;
+  const prev=BLOCKS[i-1], prev2=BLOCKS[i-2];
+  const sinceBiz=sinceType('biz',9), sinceMural=sinceType('mural',14), sinceGap=sinceType('gap',5);
+  let type, r=wrand();
+  if(sinceMural>9 && r<0.16) type='mural';                          // rare landmark
+  else if(sinceBiz>4 && wrand()<0.16) type='biz';                   // occasional corner business
+  else if(sinceGap>2 && wrand()<0.18) type='gap';                   // alley / garden / lot
+  else { const rr=wrand(); type= rr<0.45?'row': rr<0.72?'ornate':'double'; }
+  /* repetition controls */
+  if(prev&&prev2&&prev.type===type&&prev2.type===type)
+    type= type==='row' ? (wrand()<0.5?'ornate':'double') : 'row';   // never 3 alike in a row
+  if(prev&&prev.type==='gap'&&type==='gap')type='row';              // no back-to-back holes
+  const b={i,type,x:blocksEndX};
+  if(type==='row'||type==='ornate'||type==='double'){
+    b.w= type==='double' ? 70+Math.floor(wrand()*18) : (type==='row'?40:44)+Math.floor(wrand()*10);
+    b.h= type==='double' ? 54+Math.floor(wrand()*16) : (type==='row'?58:64)+Math.floor(wrand()*16);
+    b.wall=pickWall(prev);
+    b.trim=TRIM_COLORS[Math.floor(wrand()*TRIM_COLORS.length)];
+    b.door=DOOR_COLORS[Math.floor(wrand()*DOOR_COLORS.length)];
+    b.cornice=Math.floor(wrand()*3);
+    b.cols= type==='double' ? 3+(wrand()>0.6?1:0) : 2;
+    b.chimney=wrand()>0.35; b.chimney2= type==='double'&&wrand()>0.5;
+    b.porch=wrand()>0.3; b.boxes=wrand()>0.55; b.plant=wrand()>0.5;
+    b.bay= type==='ornate'&&wrand()>0.3;
+    b.litSeed=Math.floor(wrand()*99991)+7;
+  } else if(type==='biz'){
+    b.w=56+Math.floor(wrand()*12); b.h=56+Math.floor(wrand()*14);
+    b.wall=pickWall(prev);
+    b.trim=TRIM_COLORS[Math.floor(wrand()*TRIM_COLORS.length)];
+    b.name=BIZ_NAMES[Math.floor(wrand()*BIZ_NAMES.length)];
+    b.awn=AWNINGS[Math.floor(wrand()*AWNINGS.length)];
+    b.litSeed=Math.floor(wrand()*99991)+7;
+  } else if(type==='mural'){
+    b.w=64; b.h=64+Math.floor(wrand()*6);
+  } else {                                                          // gap
+    b.w=16+Math.floor(wrand()*10);
+    b.sub=['alley','garden','lot'][Math.floor(wrand()*3)];
+  }
+  if(prev&&b.h&&prev.h&&Math.abs(b.h-prev.h)<6)b.h+=8;              // roofline must actually change
+  b.tree= type!=='gap'&&type!=='mural'&&wrand()>0.72;
+  b.myrtle= b.tree&&wrand()>0.5;                                    // crepe myrtle in bloom
+  BLOCKS.push(b); blocksEndX+=b.w;
+}
+
+/* ---- shared facade parts ---- */
+function brickTicks(x,top,w,bot,alpha){
+  C.fillStyle='rgba(0,0,0,'+alpha+')';
+  for(let y=top+6;y<bot;y+=6)
+    for(let xx=x+(((y/6)|0)%2?0:3);xx<x+w-2;xx+=7)C.fillRect(Math.round(xx),y,2,1);
+}
+function drawCornice(x,top,w,style,trim){
+  px(x,top,w,3,'#2b2333');
+  if(style===0){ px(x-1,top,w+2,2,trim); for(let t=x+2;t<x+w-2;t+=5)px(t,top+3,2,2,trim); }   // bracketed
+  else if(style===1){ px(x-1,top,w+2,2,trim); px(x+1,top-2,w-2,2,trim); }                     // stepped parapet
+  else { px(x-1,top,w+2,2,trim); for(let t=x+1;t<x+w-1;t+=3)px(t,top+2,1,1,trim); }           // dentil row
+}
+function drawTallWindow(x,y,lit,trim){
+  px(x-1,y-1,8,2,trim);                                             // lintel
+  px(x,y,6,12,'#2b2333');
+  px(x+1,y+1,4,10, lit?'#ffca6b':'#3a2c4a');
+  if(lit)px(x+1,y+1,4,3,'#ffe3a0');
+  px(x+1,y+6,4,1,'#2b2333');                                        // sash
+  px(x-1,y+12,8,1,trim);                                            // sill
+}
+function drawChimney(x,top){ px(x-1,top-7,6,2,'#2b2333'); px(x,top-5,4,6,'#4a2c26'); }
+function drawStoop(dx){
+  px(dx-2,136,14,2,'#8f887c'); px(dx-1,134,12,2,'#a09a8e');         // steps up from sidewalk
+  px(dx-4,128,2,8,'#3d3348'); px(dx+12,128,2,8,'#3d3348');          // iron rails
+}
+function drawPorch(x,w,trim,door){
+  px(x+2,120,w-4,3,'#2b2333');                                      // porch roof
+  px(x+3,123,2,15,trim); px(x+w-5,123,2,15,trim);                   // posts
+  px(x+6,129,w-12,1,trim);
+  for(let rx=x+6;rx<x+w-6;rx+=3)px(rx,131,1,7,trim);                // railing
+  const dx=x+Math.floor(w/2)-5;
+  px(dx,122,10,16,'#2b2333'); px(dx+1,123,8,15,door);
+  px(dx+2,125,6,3,'#ffca6b');                                       // lit transom
+  px(dx-2,138,14,2,'#8f887c');
+}
+
+/* ---- archetype renderers ---- */
+function drawRowHouse(b,sx){
+  const top=140-b.h, w=b.w;
+  px(sx,top,w,b.h,b.wall);
+  brickTicks(sx,top,w,138, WALLS_BRICK.includes(b.wall)?0.16:0.07);
+  if(b.chimney)drawChimney(sx+5,top);
+  if(b.chimney2)drawChimney(sx+w-10,top);
+  drawCornice(sx,top,w,b.cornice,b.trim);
+  let s=b.litSeed; const lr=()=>(s=(s*16807)%2147483647)/2147483647;
+  const colW=Math.floor((w-14)/b.cols);
+  for(let wy=top+6;wy<104;wy+=15)
+    for(let ci=0;ci<b.cols;ci++){
+      const wx=sx+8+ci*colW;
+      drawTallWindow(wx,wy,lr()>0.42,b.trim);
+      if(b.boxes&&wy+15>=104){                                      // window boxes, ground floor
+        px(wx-1,wy+13,8,2,'#2a4a2e');
+        if(lr()>0.4)px(wx+1,wy+12,1,1,'#c85a7a'); px(wx+4,wy+12,1,1,'#d8a24a');
+      }
+    }
+  if(b.bay){                                                        // projecting bay, 2nd floor
+    px(sx+w-17,top+18,14,2,b.trim);
+    px(sx+w-16,top+20,12,20,b.wall);
+    px(sx+w-14,top+23,8,12,'#2b2333');
+    px(sx+w-13,top+24,6,10, lr()>0.5?'#ffca6b':'#3a2c4a');
+    px(sx+w-17,top+40,14,2,b.trim);
+  }
+  if(b.porch)drawPorch(sx,w,b.trim,b.door);
+  else{ const dx=sx+Math.floor(w/2)-5;
+    px(dx,120,10,18,'#2b2333'); px(dx+1,121,8,17,b.door);
+    px(dx+3,124,4,2,'#ffca6b');
+    drawStoop(dx);
+  }
+  if(b.plant){ px(sx+2,134,6,4,'#26402e'); px(sx+3,132,4,3,'#2e4f38'); }  // porch shrub
+}
+function drawBiz(b,sx){
+  const top=140-b.h, w=b.w;
+  px(sx,top,w,b.h,b.wall);
+  brickTicks(sx,top,w,108, WALLS_BRICK.includes(b.wall)?0.16:0.07);
+  drawCornice(sx,top,w,0,b.trim);
+  let s=b.litSeed; const lr=()=>(s=(s*16807)%2147483647)/2147483647;
+  if(b.h>62)for(let ci=0;ci<Math.floor((w-12)/16);ci++)drawTallWindow(sx+8+ci*16,top+8,lr()>0.4,b.trim);
+  px(sx+3,108,w-6,32,'#241a2e');                                    // storefront
+  px(sx+4,101,w-8,9,'#f0e8d8');                                     // sign board
+  C.fillStyle='#8a2a24'; C.font='bold 7px "Courier New",monospace'; C.textAlign='center';
+  C.fillText(b.name,sx+Math.floor(w/2),108);
+  for(let ax=sx+4;ax<sx+w-8;ax+=6){                                 // striped awning
+    px(ax,111,6,4,((ax/6)|0)%2?b.awn[0]:b.awn[1]); px(ax,115,6,1,'rgba(0,0,0,.25)');
+  }
+  const hw=Math.floor(w/2);
+  px(sx+6,118,hw-8,20,'#ffca6b');                                   // lit glass
+  px(sx+hw+2,118,hw-10,20,'#8fd8c8');
+  px(sx+hw-1,118,3,20,'#2b2333');                                   // door mullion
+}
+function drawGap(b,sx){
+  const w=b.w;
+  if(b.sub==='alley'){
+    px(sx,96,w,44,'#17102a');                                       // dark slot between walls
+    px(sx+2,100,2,36,'#241533');
+    px(sx+w-5,108,3,2,'#ffca6b');                                   // one deep-set lit window
+  } else if(b.sub==='garden'){                                      // pocket garden, iron fence
+    px(sx+Math.floor(w/2)-1,116,2,16,'#3a2a22');
+    px(sx+Math.floor(w/2)-6,106,12,12,'#2e4f38'); px(sx+Math.floor(w/2)-4,102,8,7,'#3a5f44');
+    px(sx+2,124,8,6,'#26402e'); px(sx+w-11,122,9,8,'#2e4f38');
+    for(let fx=sx+1;fx<sx+w-1;fx+=4)px(fx,127,1,11,'#1d1826');
+    px(sx,132,w,1,'#1d1826');
+  } else {                                                          // empty side lot
+    px(sx,124,w,16,'#241a2e');
+    for(let fx=sx+1;fx<sx+w;fx+=5)px(fx,129,1,6,'#1d1826');
+    px(sx,132,w,1,'#1d1826');
+    px(sx+3,120,6,6,'#26402e');
+  }
+}
+function drawMuralWall(b,sx){
+  const top=140-b.h, bg=MURAL.pal[MURAL.pal.length-1];
+  px(sx,top,b.w,b.h,bg);
+  px(sx,top,b.w,2,'#2b2333');
+  if(muralCv)C.drawImage(muralCv,sx+Math.floor((b.w-48)/2),top+5);
+}
+function drawBlock(b,sx){
+  if(b.type==='gap')drawGap(b,sx);
+  else if(b.type==='mural')drawMuralWall(b,sx);
+  else if(b.type==='biz')drawBiz(b,sx);
+  else drawRowHouse(b,sx);
+  if(b.tree){                                                       // street tree half-hiding the facade
+    const tx=sx+b.w-5;
+    px(tx,118,3,22,'#3a2a22');
+    const leaf=b.myrtle?'#7a4a62':'#26402e', leaf2=b.myrtle?'#96628a':'#2e4f38';
+    px(tx-8,102,19,16,leaf); px(tx-5,97,13,9,leaf2);
+    if(b.myrtle){ px(tx-6,105,2,2,'#c88aa8'); px(tx+4,108,2,2,'#c88aa8'); px(tx-2,96,2,2,'#c88aa8'); }
+  }
+}
+function drawBlocks(off){
+  while(blocksEndX<off+VW+96)genBlock();
+  let lo=0,hi=BLOCKS.length-1,first=0;                              // binary search first visible
+  while(lo<=hi){ const mid=(lo+hi)>>1;
+    if(BLOCKS[mid].x+BLOCKS[mid].w<off)lo=mid+1; else{first=mid;hi=mid-1;} }
+  for(let k=first;k<BLOCKS.length;k++){
+    const b=BLOCKS[k], sx=Math.round(b.x-off);
+    if(sx>VW)break;
+    drawBlock(b,sx);
+  }
+}
 
 /* AUTHORED CANON — "Possum & Flowers" mural (Emily, v1). Converted 48×48/12c. NEVER regenerate. */
 const MURAL={w:48,h:48,pal:["#d5b375","#867342","#625953","#8f3d5b","#533f52","#1d3949","#5a234c","#33203f","#23173b","#200c3f","#141a37","#130933"],rows:[
@@ -269,56 +480,6 @@ function buildMural(){
     g.fillRect(x,y,1,1);
   }
 }
-function isLandmark(i){ return ((i*2654435761)>>>0)%2147483647%28===9; }
-function drawLandmarkWall(hx){
-  const top=84, bg=MURAL.pal[MURAL.pal.length-1];   // mural's own deep purple = the painted wall
-  px(hx,top,60,140-top,bg);                          // edge-to-edge, no generic brick
-  px(hx,top,60,2,"#2b2333");                         // roofline
-  if(muralCv)C.drawImage(muralCv,hx+6,top+5);
-}
-
-function drawHouses(off){
-  const BW=64;                                  // house width
-  const first=Math.floor(off/BW);
-  for(let i=first;i<first+8;i++){
-    const hx=i*BW-off;
-    seed=(i*2654435761)%2147483647||1987;
-    if(isLandmark(i)){ drawLandmarkWall(hx); continue; }                  // authored mural landmark
-    const wall=HOUSE_WALLS[Math.floor(rand()*HOUSE_WALLS.length)];
-    const h=52+Math.floor(rand()*22), top=140-h;
-    px(hx,top,BW-4,h,wall);
-    px(hx,top,BW-4,3,'#2b2333');                                          // cornice
-    px(hx,top+3,BW-4,2,'rgba(0,0,0,.28)');
-    for(let b=top+8;b<138;b+=6) px(hx+((b/6)%2?0:3),b,2,1,'rgba(0,0,0,.14)'); // brick tick
-    const isStore=rand()>0.82;
-    if(isStore){                                                          // mini mart!
-      px(hx+4,110,BW-12,30,'#241a2e');
-      px(hx+6,104,BW-16,10,'#f0e8d8');
-      C.fillStyle='#c22a2a'; C.font='bold 7px "Courier New",monospace'; C.textAlign='left';
-      C.fillText('MINI MART',hx+8,112);
-      px(hx+8,118,16,18,'#ffca6b'); px(hx+30,118,16,18,'#8fd8c8');        // lit glass
-      px(hx+26,118,3,18,'#2b2333');
-    } else {
-      for(let wy=top+10;wy<118;wy+=16){                                   // windows
-        for(let wx=hx+8;wx<hx+BW-16;wx+=18){
-          const lit=rand()>0.42;
-          px(wx,wy,8,11,'#2b2333');
-          px(wx+1,wy+1,6,9, lit?'#ffca6b':'#3a2c4a');
-          if(lit)px(wx+1,wy+1,6,2,'#ffe3a0');
-        }
-      }
-      px(hx+6,122,BW-16,4,'#2b2333');                                     // porch roof
-      px(hx+8,126,2,14,'#3d3348'); px(hx+BW-14,126,2,14,'#3d3348');
-      for(let rx=hx+10;rx<hx+BW-14;rx+=4)px(rx,132,1,8,'#d8d0c4');        // railing
-      px(hx+Math.floor(BW/2)-6,124,10,16,'#4a1e28');                      // door
-    }
-    if(rand()>0.6){                                                       // street tree
-      px(hx+BW-6,120,3,20,'#3a2a22');
-      px(hx+BW-14,104,20,18,'#26402e'); px(hx+BW-11,100,14,10,'#2e4f38');
-    }
-  }
-}
-
 function drawGround(off){
   px(0,140,VW,4,'#6e4438');                                               // sidewalk back edge
   px(0,144,VW,26,'#a05a44');                                              // bricks
@@ -557,7 +718,7 @@ function render(){
   C.fillStyle='rgba(255,202,107,.14)';
   for(let x=-(so%24)+4;x<VW;x+=24)C.fillRect(Math.round(x),92,2,3);
 
-  drawHouses(G.x*0.5);
+  drawBlocks(G.x*0.5);
   drawGround(G.x);
   drawLamps(G.x);
   for(const p of G.props)drawSign(p,p.x-G.x);
@@ -634,6 +795,7 @@ function resetRun(){
     dead:false,held:false,frame:0,hearts:6,iframes:0,score:0,snacks:0,jumps:0,pulse:0,bonus:0,combo:0,jumpBuf:0,pcount:0,
     hazards:[],props:[],particles:[],nextSpawn:140,streetIdx:0});
   seed=1987+Math.floor(Math.random()*99999);
+  resetBlocks(seed);                                                // fresh street layout each run
 }
 
 /* ---------- title / picker ---------- */
