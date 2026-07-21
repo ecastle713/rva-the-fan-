@@ -209,9 +209,9 @@ function drawPossumDead(ctx,cx,feetY,p){
    once to an offscreen canvas. Deep indigo up top (HUD contrast) through
    magenta to warm coral at the horizon. ---- */
 const SKY_BANDS=[
-  ['#131033',22],['#1a1240',12],['#251445',11],['#331750',10],
-  ['#4a1c55',10],['#63235a',9],['#7f2e5c',9],['#9c3c5c',9],
-  ['#b84e58',9],['#cf6055',9],['#e07a58',9],['#ef9463',21]
+  ['#221d52',22],['#2d2060',12],['#3b2369',11],['#4c276e',10],
+  ['#602c70',10],['#763468',9],['#8f3e63',9],['#a94b5e',9],
+  ['#c25c59',9],['#d76f58',9],['#e88760',9],['#f4a06a',21]
 ];
 let skyCv=null;
 function buildSky(){
@@ -363,7 +363,6 @@ function genBlock(){
   }
   if(prev&&b.h&&prev.h&&Math.abs(b.h-prev.h)<6)b.h+=8;              // roofline must actually change
   b.tree= type!=='gap'&&type!=='mural'&&wrand()>0.72;
-  b.myrtle= b.tree&&wrand()>0.5;                                    // crepe myrtle in bloom
   BLOCKS.push(b); blocksEndX+=b.w;
 }
 
@@ -495,9 +494,7 @@ function drawBlock(b,sx){
   if(b.tree){                                                       // street tree half-hiding the facade
     const tx=sx+b.w-5;
     px(tx,118,3,22,'#3a2a22');
-    const leaf=b.myrtle?'#7a4a62':'#26402e', leaf2=b.myrtle?'#96628a':'#2e4f38';
-    px(tx-8,102,19,16,leaf); px(tx-5,97,13,9,leaf2);
-    if(b.myrtle){ px(tx-6,105,2,2,'#c88aa8'); px(tx+4,108,2,2,'#c88aa8'); px(tx-2,96,2,2,'#c88aa8'); }
+    px(tx-8,102,19,16,'#26402e'); px(tx-5,97,13,9,'#2e4f38');
   }
 }
 function drawBlocks(off){
