@@ -203,8 +203,90 @@ function drawPossumDead(ctx,cx,feetY,p){
 /* =========================================================
    WORLD — palette pulled straight from the approved mockup
    ========================================================= */
-const SKY=[['#160b26',0],['#2b1240',.35],['#5c1e50',.6],['#a33d5c',.82],['#d4695a',1]];
-const STARS=[]; for(let i=0;i<40;i++)STARS.push({x:rand()*VW,y:rand()*70,tw:rand()*100});
+/* ---- twilight sky: pixel color bands + restrained dither, prerendered
+   once to an offscreen canvas. Deep indigo up top (HUD contrast) through
+   magenta to warm coral at the horizon. ---- */
+const SKY_BANDS=[
+  ['#131033',30],['#1a1240',16],['#251445',14],['#331750',12],
+  ['#471a55',12],['#5f2158',11],['#7a2c59',11],['#98395a',10],
+  ['#b34b58',9],['#cb5f55',8],['#df7455',7]
+];
+let skyCv=null;
+function buildSky(){
+  skyCv=document.createElement('canvas'); skyCv.width=VW; skyCv.height=140;
+  const g=skyCv.getContext('2d'); let y=0;
+  for(let bi=0;bi<SKY_BANDS.length;bi++){
+    const [c,h]=SKY_BANDS[bi];
+    g.fillStyle=c; g.fillRect(0,y,VW,h);
+    if(bi>0){ g.fillStyle=SKY_BANDS[bi-1][0];                       // 1px dither row at each seam
+      for(let x=(bi%2)*2;x<VW;x+=4)g.fillRect(x,y,2,1); }
+    y+=h;
+  }
+}
+
+/* ---- stars: limited brightness states, independent slow timing ---- */
+const STARS=[]; for(let i=0;i<36;i++)STARS.push({
+  x:Math.floor(rand()*VW), y:Math.floor(rand()*88),
+  per:26+Math.floor(rand()*22), ph:Math.floor(rand()*997), big:rand()>0.88});
+const STAR_LV=['rgba(232,216,240,.25)','rgba(232,216,240,.55)','rgba(232,216,240,.95)','rgba(232,216,240,.55)'];
+function drawStars(){
+  for(const s of STARS){
+    const st=Math.floor((G.t+s.ph)/s.per)%4;
+    C.fillStyle=STAR_LV[st]; C.fillRect(s.x,s.y,1,1);
+    if(s.big&&st===2){ C.fillRect(s.x-1,s.y,1,1); C.fillRect(s.x+1,s.y,1,1);
+      C.fillRect(s.x,s.y-1,1,1); C.fillRect(s.x,s.y+1,1,1); }
+  }
+}
+
+/* ---- layered skyline: Richmond, not Manhattan — a few downtown
+   towers far off, then uneven low rooftops, steeples, and trees ---- */
+const hash=i=>(((i*2654435761)>>>0)%2147483647)/2147483647;
+function drawFarSkyline(){
+  const so=G.x*0.06, CW=22, n=Math.ceil(VW/CW)+2, first=Math.floor(so/CW);
+  C.fillStyle='#1e1338';
+  for(let i=first;i<first+n;i++){
+    const r=hash(i), x=Math.round(i*CW-so);
+    const tall=hash(i*3+7)>0.84;                                    // occasional tower
+    const h= tall? 58+Math.floor(r*26) : 16+Math.floor(r*18);
+    C.fillRect(x,140-h, tall?12+Math.floor(r*6):CW-4, h);
+    if(tall&&hash(i*5+1)>0.5)C.fillRect(x+3,140-h-4,8,4);           // stepped crown
+  }
+  C.fillStyle='rgba(255,202,107,.15)';                              // distant lit windows
+  for(let i=first;i<first+n;i++){
+    const x=Math.round(i*CW-so);
+    if(hash(i*11+3)>0.45){
+      C.fillRect(x+4,98+Math.floor(hash(i*13)*22),2,2);
+      C.fillRect(x+9,106+Math.floor(hash(i*17)*18),2,2);
+    }
+  }
+  if(Math.floor(G.t/55)%2){                                         // rare rooftop aircraft blink
+    for(let i=first;i<first+n;i++)if(hash(i*3+7)>0.84&&i%13===4){
+      C.fillStyle='#e8584a';
+      C.fillRect(Math.round(i*CW-so)+6,140-(58+Math.floor(hash(i)*26))-2,1,1);
+    }
+  }
+}
+function drawMidSkyline(){
+  const so=G.x*0.22, CW=34, n=Math.ceil(VW/CW)+2, first=Math.floor(so/CW);
+  C.fillStyle='#2b1a3f';
+  for(let i=first;i<first+n;i++){
+    const r=hash(i*7+2), x=Math.round(i*CW-so), kind=hash(i*3+5);
+    if(kind>0.86){                                                  // church steeple
+      const bh=24+Math.floor(r*8);
+      C.fillRect(x,140-bh,18,bh);
+      C.fillRect(x+6,140-bh-10,6,10);
+      C.fillRect(x+7,140-bh-16,4,6);
+      C.fillRect(x+8,140-bh-21,2,5);
+    } else if(kind<0.2){                                            // tree canopy break
+      C.fillRect(x+2,126,22,14); C.fillRect(x+6,120,14,8);
+    } else {                                                        // low rooftops + chimneys
+      const bh=16+Math.floor(r*14);
+      C.fillRect(x,140-bh,CW-6,bh);
+      if(hash(i*9+1)>0.45)C.fillRect(x+4,140-bh-4,3,4);
+      if(hash(i*9+4)>0.7)C.fillRect(x+CW-14,140-bh-3,3,3);
+    }
+  }
+}
 
 /* =========================================================
    RICHMOND FACADE BLOCKS — variable-width buildings built
@@ -716,24 +798,13 @@ function hurt(h){
 
 /* ---------- render ---------- */
 function render(){
-  // sky
-  const g=C.createLinearGradient(0,0,0,140);
-  for(const [c,s] of SKY)g.addColorStop(s,c);
-  C.fillStyle=g; C.fillRect(0,0,VW,140);
-  for(const s of STARS){ if(Math.floor((G.t+s.tw)/40)%3)px(s.x,s.y,1,1,'#e8d8f0'); }
-  // clouds streaks
-  C.fillStyle='rgba(212,105,90,.25)';
-  for(let i=0;i<4;i++){ const cx=((i*140-G.x*0.05)%(VW+80))-40; C.fillRect(cx,68+i*9,60,3); }
-  // skyline (far parallax)
-  const so=G.x*0.15;
-  C.fillStyle='#241533';
-  for(let x=-(so%24);x<VW;x+=24){
-    const h=36+Math.abs(Math.sin((x+so)*0.045))*34;
-    C.fillRect(Math.round(x),140-h,18,h);
-  }
-  C.fillStyle='rgba(255,202,107,.14)';
-  for(let x=-(so%24)+4;x<VW;x+=24)C.fillRect(Math.round(x),92,2,3);
-
+  C.drawImage(skyCv,0,0);                                           // banded twilight sky
+  drawStars();
+  C.fillStyle='rgba(203,95,85,.28)';                                // slow drifting clouds
+  for(let i=0;i<4;i++){ const cx=(((i*140-G.x*0.02-G.t*0.03)%(VW+80))+VW+80)%(VW+80)-40;
+    C.fillRect(cx,64+i*10,54,3); C.fillRect(cx+8,62+i*10,30,2); }
+  drawFarSkyline();
+  drawMidSkyline();
   drawBlocks(G.x*0.5);
   drawGround(G.x);
   drawLamps(G.x);
@@ -866,6 +937,7 @@ function loop(){
   requestAnimationFrame(loop);
 }
 buildPicker();
+buildSky();
 buildMurals();
 render();
 loop();
