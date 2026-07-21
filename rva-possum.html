@@ -270,7 +270,8 @@ function genBlock(){
     b.awn=AWNINGS[Math.floor(wrand()*AWNINGS.length)];
     b.litSeed=Math.floor(wrand()*99991)+7;
   } else if(type==='mural'){
-    b.w=64; b.h=64+Math.floor(wrand()*6);
+    b.mural=pickMural();
+    b.w=b.mural.w+16; b.h=Math.max(b.mural.h+16,64)+Math.floor(wrand()*6);
   } else {                                                          // gap
     b.w=16+Math.floor(wrand()*10);
     b.sub=['alley','garden','lot'][Math.floor(wrand()*3)];
@@ -390,10 +391,15 @@ function drawGap(b,sx){
   }
 }
 function drawMuralWall(b,sx){
-  const top=140-b.h, bg=MURAL.pal[MURAL.pal.length-1];
-  px(sx,top,b.w,b.h,bg);
-  px(sx,top,b.w,2,'#2b2333');
-  if(muralCv)C.drawImage(muralCv,sx+Math.floor((b.w-48)/2),top+5);
+  const top=140-b.h, w=b.w, m=b.mural||MURALS[0];
+  px(sx,top,w,b.h,m.wall);                                          // exposed brick side wall
+  brickTicks(sx,top,w,138,0.18);
+  px(sx-1,top-2,w+2,2,'#4a2c26'); px(sx,top,w,2,'#2b2333');         // parapet cap + roofline
+  const mx=sx+Math.floor((w-m.w)/2), my=top+8;
+  if(m.cv)C.drawImage(m.cv,mx,my);                                  // painted straight on the wall
+  brickTicks(mx,my,m.w,my+m.h,0.10);                                // brick reads through the paint
+  px(sx+w-4,top+4,2,132-top,'#3a2320');                             // downspout
+  px(sx+2,134,8,4,'#26402e'); px(sx+w-13,134,9,4,'#2e4f38');        // planting at the base
 }
 function drawBlock(b,sx){
   if(b.type==='gap')drawGap(b,sx);
@@ -420,8 +426,10 @@ function drawBlocks(off){
   }
 }
 
-/* AUTHORED CANON — "Possum & Flowers" mural (Emily, v1). Converted 48×48/12c. NEVER regenerate. */
-const MURAL={w:48,h:48,pal:["#d5b375","#867342","#625953","#8f3d5b","#533f52","#1d3949","#5a234c","#33203f","#23173b","#200c3f","#141a37","#130933"],rows:[
+/* AUTHORED CANON — "Possum & Flowers" mural (Emily, v1). Converted 48×48/12c. NEVER regenerate.
+   Murals are DATA: add new entries to MURALS below (id, art, wall tone,
+   rarity) and the block system picks them up — no environment-code edits. */
+const MURAL={id:'possum-flowers',w:48,h:48,wall:'#5e2c28',rarity:1,pal:["#d5b375","#867342","#625953","#8f3d5b","#533f52","#1d3949","#5a234c","#33203f","#23173b","#200c3f","#141a37","#130933"],rows:[
 "999999999999999b77776667777778bb9999999999999999",
 "999997999779b55563334443344334117b95599999999999",
 "9999918733655225633378b438b436100189799799aaaa99",
@@ -471,14 +479,22 @@ const MURAL={w:48,h:48,pal:["#d5b375","#867342","#625953","#8f3d5b","#533f52","#
 "99999999799aa95558555555555585998558a99859999999",
 "999999999999999999998999989999999999999999999999"
 ]};
-let muralCv=null;
-function buildMural(){
-  muralCv=document.createElement("canvas"); muralCv.width=48; muralCv.height=48;
-  const g=muralCv.getContext("2d");
-  for(let y=0;y<48;y++)for(let x=0;x<48;x++){
-    g.fillStyle=MURAL.pal["0123456789ab".indexOf(MURAL.rows[y][x])];
-    g.fillRect(x,y,1,1);
+const MURALS=[MURAL];
+function buildMurals(){
+  for(const m of MURALS){
+    m.cv=document.createElement("canvas"); m.cv.width=m.w; m.cv.height=m.h;
+    const g=m.cv.getContext("2d");
+    for(let y=0;y<m.h;y++)for(let x=0;x<m.w;x++){
+      g.fillStyle=m.pal["0123456789ab".indexOf(m.rows[y][x])];
+      g.fillRect(x,y,1,1);
+    }
   }
+}
+function pickMural(){                               // rarity-weighted pick
+  let tot=0; for(const m of MURALS)tot+=m.rarity;
+  let t=wrand()*tot;
+  for(const m of MURALS)if((t-=m.rarity)<=0)return m;
+  return MURALS[0];
 }
 function drawGround(off){
   px(0,140,VW,4,'#6e4438');                                               // sidewalk back edge
@@ -850,7 +866,7 @@ function loop(){
   requestAnimationFrame(loop);
 }
 buildPicker();
-buildMural();
+buildMurals();
 render();
 loop();
 </script>
