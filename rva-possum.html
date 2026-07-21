@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>RVA POSSUM · v0.1</title>
+<title>RVA POSSUM · v0.2</title>
 <style>
   html,body{margin:0;padding:0;background:#120a1e;height:100%;overflow:hidden;
     -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
@@ -75,9 +75,11 @@
 <script>
 "use strict";
 /* =========================================================
-   RVA POSSUM — v0.4.1 "Night Shift"
-   (v0.4.1: mural wall painted edge-to-edge in the artwork's
-    own background — no more generic brick frame)
+   RVA POSSUM — v0.2 "Night Shift · Richmond pass"
+   (v0.2: environment upgrade — modular Fan District facade
+    blocks with repetition controls, murals painted onto
+    exposed side walls, banded twilight sky, twinkling
+    stars, layered Richmond skyline, street props)
    Endless runner spin-off of RVA (Fan District).
    TAP = hop · HOLD = play dead (flop on landing)
    Reuses drawPossum lineage from rva-v0-5.
@@ -207,9 +209,9 @@ function drawPossumDead(ctx,cx,feetY,p){
    once to an offscreen canvas. Deep indigo up top (HUD contrast) through
    magenta to warm coral at the horizon. ---- */
 const SKY_BANDS=[
-  ['#131033',30],['#1a1240',16],['#251445',14],['#331750',12],
-  ['#471a55',12],['#5f2158',11],['#7a2c59',11],['#98395a',10],
-  ['#b34b58',9],['#cb5f55',8],['#df7455',7]
+  ['#131033',22],['#1a1240',12],['#251445',11],['#331750',10],
+  ['#4a1c55',10],['#63235a',9],['#7f2e5c',9],['#9c3c5c',9],
+  ['#b84e58',9],['#cf6055',9],['#e07a58',9],['#ef9463',21]
 ];
 let skyCv=null;
 function buildSky(){
@@ -321,9 +323,9 @@ function genBlock(){
   const i=BLOCKS.length;
   wr.s=((runSeed+i*2654435761)>>>0)%2147483647||1234;
   const prev=BLOCKS[i-1], prev2=BLOCKS[i-2];
-  const sinceBiz=sinceType('biz',9), sinceMural=sinceType('mural',14), sinceGap=sinceType('gap',5);
+  const sinceBiz=sinceType('biz',9), sinceMural=sinceType('mural',20), sinceGap=sinceType('gap',5);
   let type, r=wrand();
-  if(sinceMural>9 && r<0.16) type='mural';                          // rare landmark
+  if(sinceMural>16 && r<0.10) type='mural';                         // rare landmark
   else if(sinceBiz>4 && wrand()<0.16) type='biz';                   // occasional corner business
   else if(sinceGap>2 && wrand()<0.18) type='gap';                   // alley / garden / lot
   else { const rr=wrand(); type= rr<0.45?'row': rr<0.72?'ornate':'double'; }
@@ -341,7 +343,8 @@ function genBlock(){
     b.cornice=Math.floor(wrand()*3);
     b.cols= type==='double' ? 3+(wrand()>0.6?1:0) : 2;
     b.chimney=wrand()>0.35; b.chimney2= type==='double'&&wrand()>0.5;
-    b.porch=wrand()>0.3; b.boxes=wrand()>0.55; b.plant=wrand()>0.5;
+    b.porch= type==='double' ? wrand()>0.15 : wrand()>0.3;          // shared porches keep doubles residential
+    b.boxes=wrand()>0.55; b.plant=wrand()>0.5;
     b.bay= type==='ornate'&&wrand()>0.3;
     b.litSeed=Math.floor(wrand()*99991)+7;
   } else if(type==='biz'){
@@ -353,7 +356,7 @@ function genBlock(){
     b.litSeed=Math.floor(wrand()*99991)+7;
   } else if(type==='mural'){
     b.mural=pickMural();
-    b.w=b.mural.w+16; b.h=Math.max(b.mural.h+16,64)+Math.floor(wrand()*6);
+    b.w=b.mural.w+8; b.h=b.mural.h+26+Math.floor(wrand()*4);
   } else {                                                          // gap
     b.w=16+Math.floor(wrand()*10);
     b.sub=['alley','garden','lot'][Math.floor(wrand()*3)];
@@ -477,10 +480,11 @@ function drawMuralWall(b,sx){
   px(sx,top,w,b.h,m.wall);                                          // exposed brick side wall
   brickTicks(sx,top,w,138,0.18);
   px(sx-1,top-2,w+2,2,'#4a2c26'); px(sx,top,w,2,'#2b2333');         // parapet cap + roofline
-  const mx=sx+Math.floor((w-m.w)/2), my=top+8;
+  drawChimney(sx+7,top);
+  const mx=sx+Math.floor((w-m.w)/2), my=top+12;                     // near edge-to-edge: thin brick reveal
   if(m.cv)C.drawImage(m.cv,mx,my);                                  // painted straight on the wall
   brickTicks(mx,my,m.w,my+m.h,0.10);                                // brick reads through the paint
-  px(sx+w-4,top+4,2,132-top,'#3a2320');                             // downspout
+  px(sx+w-3,top+4,2,132-top,'#3a2320');                             // downspout in the brick margin
   px(sx+2,134,8,4,'#26402e'); px(sx+w-13,134,9,4,'#2e4f38');        // planting at the base
 }
 function drawBlock(b,sx){
