@@ -592,6 +592,36 @@ function drawGround(off){
   for(let x=-(off%40);x<VW;x+=40)C.fillRect(Math.round(x),186,16,2);      // dashes
 }
 
+/* ---- street-level props: decorative only, back band of the sidewalk,
+   weighted + spaced so the possum lane stays readable. Never collide. ---- */
+const PROP_TYPES=['meter','bikerack','bicycle','bench','mailbox','planter','newsbox','bin','cones','busstop'];
+const PROP_SP=78;
+function drawProps(off){
+  const first=Math.floor(off/PROP_SP), n=Math.ceil(VW/PROP_SP)+1;
+  for(let i=first;i<first+n;i++){
+    if(hash(i*31+7)<0.34)continue;                                  // breathing room
+    const x=Math.round(i*PROP_SP-off+6+hash(i*13)*40);
+    const lx=(((x+off-30)%170)+170)%170;                            // keep clear of lamp posts
+    if(lx<16||lx>154)continue;
+    drawProp(PROP_TYPES[Math.floor(hash(i*17+3)*PROP_TYPES.length)],x,i);
+  }
+}
+function drawProp(t,x,i){
+  const Y=156;
+  if(t==='meter'){ px(x,Y-10,1,10,'#5a5a66'); px(x-1,Y-13,3,4,'#8a8f96'); px(x,Y-12,1,1,'#2b2333'); }
+  else if(t==='bikerack'){ for(let k=0;k<3;k++){ px(x+k*5,Y-6,4,1,'#8a8f96'); px(x+k*5,Y-5,1,5,'#8a8f96'); px(x+k*5+3,Y-5,1,5,'#8a8f96'); } }
+  else if(t==='bicycle'){ px(x,Y-4,4,4,'#1d1826'); px(x+8,Y-4,4,4,'#1d1826'); px(x+1,Y-5,10,1,'#4a7a9a');
+    px(x+2,Y-8,1,4,'#4a7a9a'); px(x+9,Y-8,1,4,'#4a7a9a'); px(x+1,Y-9,3,1,'#4a7a9a'); px(x+9,Y-9,2,1,'#2b2333'); }
+  else if(t==='bench'){ px(x,Y-9,14,2,'#5a4432'); px(x,Y-5,14,2,'#5a4432'); px(x+1,Y-3,2,3,'#2b2333'); px(x+11,Y-3,2,3,'#2b2333'); }
+  else if(t==='mailbox'){ px(x,Y-9,7,5,'#3a4a7a'); px(x+1,Y-10,5,1,'#3a4a7a'); px(x+1,Y-4,1,4,'#2b2333'); px(x+5,Y-4,1,4,'#2b2333'); }
+  else if(t==='planter'){ px(x,Y-4,9,4,'#6e4438'); px(x+1,Y-6,7,2,'#26402e'); px(x+3,Y-7,3,1,'#2e4f38'); if(hash(i*7)>0.5)px(x+4,Y-7,1,1,'#c85a7a'); }
+  else if(t==='newsbox'){ px(x,Y-9,6,9,'#8a2a24'); px(x+1,Y-8,4,3,'#d8d0c4'); }
+  else if(t==='bin'){ px(x,Y-8,7,8,'#2a4a5a'); px(x+1,Y-9,5,1,'#2a4a5a'); px(x+2,Y-6,3,4,'#3a6a7a'); }
+  else if(t==='cones'){ px(x,Y-4,3,4,'#c8552a'); px(x+1,Y-6,1,2,'#c8552a'); px(x+6,Y-4,3,4,'#c8552a'); px(x+7,Y-6,1,2,'#c8552a'); px(x,Y-3,3,1,'#e8e0d0'); px(x+6,Y-3,3,1,'#e8e0d0'); }
+  else if(t==='busstop'){ px(x,Y-16,2,16,'#3d3348'); px(x+12,Y-16,2,16,'#3d3348'); px(x-1,Y-18,16,3,'#5a5466');
+    px(x+2,Y-12,10,8,'rgba(143,216,200,.25)'); px(x,Y-5,14,1,'#5a5466'); }
+}
+
 function drawLamps(off){
   const SP=170, first=Math.floor(off/SP);
   for(let i=first;i<first+4;i++){
@@ -807,6 +837,7 @@ function render(){
   drawMidSkyline();
   drawBlocks(G.x*0.5);
   drawGround(G.x);
+  drawProps(G.x);
   drawLamps(G.x);
   for(const p of G.props)drawSign(p,p.x-G.x);
   for(const h of G.hazards)drawHazard(h,h.x-G.x);
